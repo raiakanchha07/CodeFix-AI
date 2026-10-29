@@ -8,6 +8,7 @@ from flask import Flask, render_template, request, jsonify, session, abort
 from config import Config
 import analyzer
 import agent_service
+import database
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,15 @@ def create_app() -> Flask:
     # In-memory session history store for Phase 1 demonstration
     # (Replaced by IBM Db2 in Phase 4)
     app.history_store: Dict[str, Dict[str, Any]] = {}
+
+    def persist_record(record: Dict[str, Any]):
+        """Persist record to memory buffer and IBM Db2 if configured."""
+        record_id = record["id"]
+        app.history_store[record_id] = record
+        if Config.is_db2_configured():
+            saved, err = database.save_history_record(record)
+            if not saved:
+                logger.warning(f"Could not persist record {record_id} to IBM Db2: {err}")
 
     # Register Context Processors
     @app.context_processor
@@ -82,6 +92,7 @@ def create_app() -> Flask:
     def api_status():
         """Check live connectivity to Ollama and IBM Db2 configuration."""
         ollama_online, status_msg, available_models = agent_service.check_ollama_status()
+        db2_online, db2_msg = database.check_db2_connection()
 
         return jsonify({
             "status": "online",
@@ -91,6 +102,8 @@ def create_app() -> Flask:
             "model": Config.OLLAMA_MODEL,
             "models_available": available_models,
             "db2_configured": Config.is_db2_configured(),
+            "db2_online": db2_online,
+            "db2_message": db2_msg,
             "max_input_chars": Config.MAX_INPUT_CHARS
         })
 
@@ -130,7 +143,7 @@ def create_app() -> Flask:
             "model_name": result.get("model_name", Config.OLLAMA_MODEL)
         }
 
-        app.history_store[record_id] = {
+        persist_record({
             "id": record_id,
             "session_id": sess_id,
             "language": language,
@@ -142,7 +155,7 @@ def create_app() -> Flask:
             "explanation": response_payload["explanation"],
             "model_name": response_payload["model_name"],
             "created_at": "Just now"
-        }
+        })
 
         return jsonify(response_payload)
 
@@ -214,7 +227,7 @@ def create_app() -> Flask:
                 "model_name": ai_result.get("model_name", Config.OLLAMA_MODEL)
             }
 
-        app.history_store[record_id] = {
+        persist_record({
             "id": record_id,
             "session_id": sess_id,
             "language": language,
@@ -226,7 +239,7 @@ def create_app() -> Flask:
             "explanation": response_payload["explanation"],
             "model_name": response_payload["model_name"],
             "created_at": "Just now"
-        }
+        })
 
         return jsonify(response_payload)
 
@@ -264,7 +277,7 @@ def create_app() -> Flask:
             "model_name": ai_result.get("model_name", Config.OLLAMA_MODEL)
         }
 
-        app.history_store[record_id] = {
+        persist_record({
             "id": record_id,
             "session_id": sess_id,
             "language": language,
@@ -276,7 +289,7 @@ def create_app() -> Flask:
             "explanation": response_payload["explanation"],
             "model_name": response_payload["model_name"],
             "created_at": "Just now"
-        }
+        })
 
         return jsonify(response_payload)
 
@@ -314,7 +327,7 @@ def create_app() -> Flask:
             "model_name": ai_result.get("model_name", Config.OLLAMA_MODEL)
         }
 
-        app.history_store[record_id] = {
+        persist_record({
             "id": record_id,
             "session_id": sess_id,
             "language": language,
@@ -326,7 +339,7 @@ def create_app() -> Flask:
             "explanation": response_payload["explanation"],
             "model_name": response_payload["model_name"],
             "created_at": "Just now"
-        }
+        })
 
         return jsonify(response_payload)
 
@@ -359,13 +372,21 @@ def create_app() -> Flask:
     @app.route("/history", methods=["GET"])
     def history():
         """List session and database saved records."""
-        records = list(app.history_store.values())
+        if Config.is_db2_configured():
+            records = database.get_history_records(limit=Config.MAX_HISTORY_PER_SESSION)
+        else:
+            records = list(app.history_store.values())
         return render_template("history.html", records=records)
 
     @app.route("/history/<record_id>", methods=["GET"])
     def view_history_record(record_id: str):
         """View a single saved history record."""
-        record = app.history_store.get(record_id)
+        record = None
+        if Config.is_db2_configured():
+            record = database.get_record_by_id(record_id)
+        if not record:
+            record = app.history_store.get(record_id)
+
         if not record:
             return render_template("error.html",
                                    status_code=404,
@@ -380,8 +401,16 @@ def create_app() -> Flask:
     @app.route("/history/<record_id>/delete", methods=["POST"])
     def delete_history_record(record_id: str):
         """Delete a single saved history record."""
+        deleted_db = False
+        if Config.is_db2_configured():
+            deleted_db = database.delete_record_by_id(record_id)
+
+        deleted_mem = False
         if record_id in app.history_store:
             del app.history_store[record_id]
+            deleted_mem = True
+
+        if deleted_db or deleted_mem:
             return jsonify({"success": True, "message": "Record deleted successfully."})
         return jsonify({"success": False, "error": "Record not found."}), 404
 
