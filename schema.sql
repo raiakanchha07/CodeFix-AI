@@ -22,3 +22,4 @@ CREATE TABLE CODEFIX_HISTORY (
 
 -- Index to optimize querying history by user session and sorting chronologically
 CREATE INDEX IDX_CODEFIX_SESSION ON CODEFIX_HISTORY (SESSION_ID, CREATED_AT DESC);
+

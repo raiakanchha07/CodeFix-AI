@@ -812,3 +812,4 @@ function formatMarkdown(text) {
 
     return html;
 }
+

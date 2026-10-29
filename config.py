@@ -59,3 +59,4 @@ class Config:
         if cls.DB2_SECURITY:
             conn_str += f"SECURITY={cls.DB2_SECURITY};"
         return conn_str
+
