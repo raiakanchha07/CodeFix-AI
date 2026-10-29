@@ -67,7 +67,7 @@ def check_ollama_status() -> Tuple[bool, str, List[str]]:
     """
     try:
         url = f"{Config.OLLAMA_BASE_URL}/api/tags"
-        response = requests.get(url, timeout=2.0)
+        response = requests.get(url, timeout=5.0)
         if response.status_code != 200:
             return False, f"Ollama HTTP service responded with status {response.status_code}.", []
 
