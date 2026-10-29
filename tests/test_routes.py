@@ -89,6 +89,23 @@ def test_analyze_code_validation(client):
     assert response.status_code == 200
     data = response.get_json()
     assert data["mode"] == "debug"
+    assert "diagnostics" in data
+
+def test_analyze_code_static_ast_syntax_error(client):
+    """Test analyze route reporting syntax error via static AST."""
+    bad_code = "def broken(\n    return 123"
+    payload = {
+        "mode": "debug",
+        "language": "python",
+        "code": bad_code,
+        "static_only": True
+    }
+    response = client.post("/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["is_valid_syntax"] is False
+    assert any("SyntaxError" in d for d in data["diagnostics"])
+    assert data["model_name"] == "Deterministic Python AST"
 
 def test_improve_and_explain_endpoints(client):
     """Test improve and explain endpoints return 200 for valid input."""
@@ -164,3 +181,4 @@ def test_not_found_page(client):
     response = client.get("/non-existent-route-404")
     assert response.status_code == 404
     assert "Page Not Found" in response.data.decode("utf-8")
+

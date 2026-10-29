@@ -6,6 +6,7 @@ import requests
 from flask import Flask, render_template, request, jsonify, session, abort
 
 from config import Config
+import analyzer
 
 # Configure logging
 logging.basicConfig(
@@ -167,7 +168,7 @@ def create_app() -> Flask:
 
     @app.route("/analyze", methods=["POST"])
     def analyze_code():
-        """Feature B: Debug Code endpoint."""
+        """Feature B: Debug Code endpoint with deterministic Python AST static analysis."""
         data = request.get_json(silent=True) or {}
         is_valid, err_msg = validate_request_payload(data, required_fields=["code", "language"])
         if not is_valid:
@@ -177,30 +178,67 @@ def create_app() -> Flask:
         code = data["code"]
         prompt = data.get("prompt", "").strip()
         error_msg = data.get("error_message", "").strip()
+        static_only = bool(data.get("static_only", False))
         sess_id = data.get("session_id", get_or_create_session_id())
 
+        # Execute deterministic AST static analysis
+        analysis = analyzer.analyze_code(code, language)
+        diagnostics = analysis.get("diagnostics", [])
+
+        # Formulate suggestions from static issues
+        suggestions = []
+        if analysis.get("syntax_error") and analysis["syntax_error"].get("suggestion"):
+            suggestions.append(analysis["syntax_error"]["suggestion"])
+        for w in analysis.get("warnings", []):
+            if w.get("suggestion"):
+                suggestions.append(w["suggestion"])
+
+        if not suggestions:
+            suggestions.append("Ensure required dependencies and libraries are imported.")
+            suggestions.append("Verify runtime parameters and edge cases.")
+
         record_id = str(uuid.uuid4())
-        response_payload = {
-            "id": record_id,
-            "mode": "debug",
-            "language": language,
-            "prompt": prompt,
-            "generated_code": code,
-            "explanation": (
-                "### Diagnostics Received\n"
-                f"Submitted {language} code received for debugging.\n\n"
-                "In Phase 2, deterministic AST static analysis will inspect syntax and common defects."
-            ),
-            "diagnostics": [
-                f"Language: {language}",
-                "Phase 1 endpoint operational. Ready for Phase 2 AST static analysis."
-            ],
-            "suggestions": [
-                "Ensure required modules are imported.",
-                "Review error message or stack trace."
-            ],
-            "model_name": Config.OLLAMA_MODEL
-        }
+
+        if static_only:
+            # Deterministic static analysis result without AI call
+            explanation = (
+                f"### Python AST Static Analysis Report\n"
+                f"- **Syntax Valid**: {'Yes' if analysis.get('is_valid_syntax') else 'No (SyntaxError detected)'}\n"
+                f"- **Static Warnings Found**: {len(analysis.get('warnings', []))}\n\n"
+                f"{analysis.get('summary', '')}"
+            )
+            response_payload = {
+                "id": record_id,
+                "mode": "debug",
+                "language": language,
+                "prompt": prompt or "Deterministic Static AST Check",
+                "generated_code": code,
+                "explanation": explanation,
+                "diagnostics": diagnostics,
+                "suggestions": suggestions,
+                "is_valid_syntax": analysis.get("is_valid_syntax", True),
+                "model_name": "Deterministic Python AST"
+            }
+        else:
+            # Full debug response (Phase 2 static analysis + Phase 3 ready for AI repair)
+            explanation = (
+                f"### Static Diagnostic Inspection\n"
+                f"{analysis.get('summary', '')}\n\n"
+                f"Static AST inspection completed. In Phase 3, this static diagnostic output is delivered "
+                f"to the local Ollama `{Config.OLLAMA_MODEL}` agent to generate the targeted fix."
+            )
+            response_payload = {
+                "id": record_id,
+                "mode": "debug",
+                "language": language,
+                "prompt": prompt,
+                "generated_code": code,
+                "explanation": explanation,
+                "diagnostics": diagnostics,
+                "suggestions": suggestions,
+                "is_valid_syntax": analysis.get("is_valid_syntax", True),
+                "model_name": Config.OLLAMA_MODEL
+            }
 
         app.history_store[record_id] = {
             "id": record_id,
@@ -212,7 +250,7 @@ def create_app() -> Flask:
             "error_message": error_msg,
             "generated_code": code,
             "explanation": response_payload["explanation"],
-            "model_name": Config.OLLAMA_MODEL,
+            "model_name": response_payload["model_name"],
             "created_at": "Just now"
         }
 
