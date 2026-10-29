@@ -7,6 +7,7 @@ from flask import Flask, render_template, request, jsonify, session, abort
 
 from config import Config
 import analyzer
+import agent_service
 
 # Configure logging
 logging.basicConfig(
@@ -80,20 +81,12 @@ def create_app() -> Flask:
     @app.route("/api/status", methods=["GET"])
     def api_status():
         """Check live connectivity to Ollama and IBM Db2 configuration."""
-        ollama_online = False
-        available_models = []
-        try:
-            res = requests.get(f"{Config.OLLAMA_BASE_URL}/api/tags", timeout=1.5)
-            if res.status_code == 200:
-                ollama_online = True
-                data = res.json()
-                available_models = [m.get("name", "") for m in data.get("models", [])]
-        except Exception:
-            ollama_online = False
+        ollama_online, status_msg, available_models = agent_service.check_ollama_status()
 
         return jsonify({
             "status": "online",
             "ollama_online": ollama_online,
+            "ollama_message": status_msg,
             "ollama_host": Config.OLLAMA_BASE_URL,
             "model": Config.OLLAMA_MODEL,
             "models_available": available_models,
@@ -106,7 +99,7 @@ def create_app() -> Flask:
     # =========================================================================
     @app.route("/generate", methods=["POST"])
     def generate_code():
-        """Feature A: Write Code endpoint."""
+        """Feature A: Write Code endpoint powered by LangChain and Ollama."""
         data = request.get_json(silent=True) or {}
         is_valid, err_msg = validate_request_payload(data, required_fields=["prompt", "language"])
         if not is_valid:
@@ -116,38 +109,25 @@ def create_app() -> Flask:
         prompt = data["prompt"].strip()
         sess_id = data.get("session_id", get_or_create_session_id())
 
-        # In Phase 1: Validates and establishes contract response structure
-        # (Connected to LangChain Ollama agent in Phase 3)
+        # Execute AI task via agent service
+        result = agent_service.execute_task(
+            mode="write",
+            language=language,
+            prompt=prompt,
+            session_id=sess_id
+        )
+
         record_id = str(uuid.uuid4())
         response_payload = {
             "id": record_id,
-            "mode": "write",
-            "language": language,
+            "mode": result["mode"],
+            "language": result["language"],
             "prompt": prompt,
-            "generated_code": (
-                f"# Generated {language.capitalize()} Solution for: {prompt}\n"
-                f"# [Phase 1 Pipeline Verified: Ready for Ollama LangChain Integration]\n\n"
-                f"def solution():\n"
-                f"    \"\"\"\n"
-                f"    Task: {prompt}\n"
-                f"    \"\"\"\n"
-                f"    print('CodeFix AI workspace ready. Connect Ollama in Phase 3.')\n\n"
-                f"if __name__ == '__main__':\n"
-                f"    solution()\n"
-            ),
-            "explanation": (
-                f"### Solution Overview\n"
-                f"Phase 1 Foundation and UI is active. Your request for language **{language}** has been validated against system constraints.\n\n"
-                f"- **Task Prompt**: {prompt}\n"
-                f"- **Model**: `{Config.OLLAMA_MODEL}`\n"
-                f"- **Session ID**: `{sess_id}`"
-            ),
-            "diagnostics": [],
-            "suggestions": [
-                "Verify Ollama is installed and running (`ollama serve`).",
-                "Ensure local model `qwen2.5-coder:3b` is pulled (`ollama pull qwen2.5-coder:3b`)."
-            ],
-            "model_name": Config.OLLAMA_MODEL
+            "generated_code": result["generated_code"],
+            "explanation": result["explanation"],
+            "diagnostics": result.get("diagnostics", []),
+            "suggestions": result.get("suggestions", []),
+            "model_name": result.get("model_name", Config.OLLAMA_MODEL)
         }
 
         app.history_store[record_id] = {
@@ -160,7 +140,7 @@ def create_app() -> Flask:
             "error_message": "",
             "generated_code": response_payload["generated_code"],
             "explanation": response_payload["explanation"],
-            "model_name": Config.OLLAMA_MODEL,
+            "model_name": response_payload["model_name"],
             "created_at": "Just now"
         }
 
@@ -168,7 +148,7 @@ def create_app() -> Flask:
 
     @app.route("/analyze", methods=["POST"])
     def analyze_code():
-        """Feature B: Debug Code endpoint with deterministic Python AST static analysis."""
+        """Feature B: Debug Code endpoint with deterministic Python AST static analysis + AI fix."""
         data = request.get_json(silent=True) or {}
         is_valid, err_msg = validate_request_payload(data, required_fields=["code", "language"])
         if not is_valid:
@@ -181,26 +161,14 @@ def create_app() -> Flask:
         static_only = bool(data.get("static_only", False))
         sess_id = data.get("session_id", get_or_create_session_id())
 
-        # Execute deterministic AST static analysis
+        # Step 1: Execute deterministic AST static analysis
         analysis = analyzer.analyze_code(code, language)
         diagnostics = analysis.get("diagnostics", [])
-
-        # Formulate suggestions from static issues
-        suggestions = []
-        if analysis.get("syntax_error") and analysis["syntax_error"].get("suggestion"):
-            suggestions.append(analysis["syntax_error"]["suggestion"])
-        for w in analysis.get("warnings", []):
-            if w.get("suggestion"):
-                suggestions.append(w["suggestion"])
-
-        if not suggestions:
-            suggestions.append("Ensure required dependencies and libraries are imported.")
-            suggestions.append("Verify runtime parameters and edge cases.")
 
         record_id = str(uuid.uuid4())
 
         if static_only:
-            # Deterministic static analysis result without AI call
+            # Deterministic static analysis report without AI call
             explanation = (
                 f"### Python AST Static Analysis Report\n"
                 f"- **Syntax Valid**: {'Yes' if analysis.get('is_valid_syntax') else 'No (SyntaxError detected)'}\n"
@@ -215,29 +183,35 @@ def create_app() -> Flask:
                 "generated_code": code,
                 "explanation": explanation,
                 "diagnostics": diagnostics,
-                "suggestions": suggestions,
+                "suggestions": [w["suggestion"] for w in analysis.get("warnings", []) if w.get("suggestion")] or [
+                    "Ensure variables are defined before usage.",
+                    "Verify loop termination conditions."
+                ],
                 "is_valid_syntax": analysis.get("is_valid_syntax", True),
                 "model_name": "Deterministic Python AST"
             }
         else:
-            # Full debug response (Phase 2 static analysis + Phase 3 ready for AI repair)
-            explanation = (
-                f"### Static Diagnostic Inspection\n"
-                f"{analysis.get('summary', '')}\n\n"
-                f"Static AST inspection completed. In Phase 3, this static diagnostic output is delivered "
-                f"to the local Ollama `{Config.OLLAMA_MODEL}` agent to generate the targeted fix."
+            # Step 2: Invoke AI agent with code, error details, and static diagnostics
+            ai_result = agent_service.execute_task(
+                mode="debug",
+                language=language,
+                prompt=prompt,
+                code=code,
+                error_message=error_msg,
+                static_diagnostics=diagnostics,
+                session_id=sess_id
             )
             response_payload = {
                 "id": record_id,
                 "mode": "debug",
                 "language": language,
                 "prompt": prompt,
-                "generated_code": code,
-                "explanation": explanation,
+                "generated_code": ai_result["generated_code"],
+                "explanation": ai_result["explanation"],
                 "diagnostics": diagnostics,
-                "suggestions": suggestions,
+                "suggestions": ai_result.get("suggestions", []),
                 "is_valid_syntax": analysis.get("is_valid_syntax", True),
-                "model_name": Config.OLLAMA_MODEL
+                "model_name": ai_result.get("model_name", Config.OLLAMA_MODEL)
             }
 
         app.history_store[record_id] = {
@@ -248,7 +222,7 @@ def create_app() -> Flask:
             "user_prompt": prompt,
             "original_code": code,
             "error_message": error_msg,
-            "generated_code": code,
+            "generated_code": response_payload["generated_code"],
             "explanation": response_payload["explanation"],
             "model_name": response_payload["model_name"],
             "created_at": "Just now"
@@ -258,7 +232,7 @@ def create_app() -> Flask:
 
     @app.route("/improve", methods=["POST"])
     def improve_code():
-        """Feature C: Improve Code endpoint."""
+        """Feature C: Improve Code endpoint powered by LangChain and Ollama."""
         data = request.get_json(silent=True) or {}
         is_valid, err_msg = validate_request_payload(data, required_fields=["code", "language"])
         if not is_valid:
@@ -266,8 +240,16 @@ def create_app() -> Flask:
 
         language = data["language"].lower()
         code = data["code"]
-        prompt = data.get("prompt", "Improve readability and structure.").strip()
+        prompt = data.get("prompt", "Improve readability, maintainability, and structure.").strip()
         sess_id = data.get("session_id", get_or_create_session_id())
+
+        ai_result = agent_service.execute_task(
+            mode="improve",
+            language=language,
+            prompt=prompt,
+            code=code,
+            session_id=sess_id
+        )
 
         record_id = str(uuid.uuid4())
         response_payload = {
@@ -275,18 +257,11 @@ def create_app() -> Flask:
             "mode": "improve",
             "language": language,
             "prompt": prompt,
-            "generated_code": code,
-            "explanation": (
-                "### Refactoring Request Received\n"
-                f"Optimization target: {prompt}\n\n"
-                "Phase 3 LangChain agent will perform behavioral-preserving refactoring."
-            ),
-            "diagnostics": [],
-            "suggestions": [
-                "Check for time and memory complexity bottlenecks.",
-                "Adhere to idiomatic naming conventions."
-            ],
-            "model_name": Config.OLLAMA_MODEL
+            "generated_code": ai_result["generated_code"],
+            "explanation": ai_result["explanation"],
+            "diagnostics": ai_result.get("diagnostics", []),
+            "suggestions": ai_result.get("suggestions", []),
+            "model_name": ai_result.get("model_name", Config.OLLAMA_MODEL)
         }
 
         app.history_store[record_id] = {
@@ -297,9 +272,9 @@ def create_app() -> Flask:
             "user_prompt": prompt,
             "original_code": code,
             "error_message": "",
-            "generated_code": code,
+            "generated_code": response_payload["generated_code"],
             "explanation": response_payload["explanation"],
-            "model_name": Config.OLLAMA_MODEL,
+            "model_name": response_payload["model_name"],
             "created_at": "Just now"
         }
 
@@ -307,7 +282,7 @@ def create_app() -> Flask:
 
     @app.route("/explain", methods=["POST"])
     def explain_code():
-        """Feature D: Explain Code endpoint."""
+        """Feature D: Explain Code endpoint powered by LangChain and Ollama."""
         data = request.get_json(silent=True) or {}
         is_valid, err_msg = validate_request_payload(data, required_fields=["code", "language"])
         if not is_valid:
@@ -315,8 +290,16 @@ def create_app() -> Flask:
 
         language = data["language"].lower()
         code = data["code"]
-        prompt = data.get("prompt", "Explain code structure.").strip()
+        prompt = data.get("prompt", "Provide a detailed walkthrough of this code.").strip()
         sess_id = data.get("session_id", get_or_create_session_id())
+
+        ai_result = agent_service.execute_task(
+            mode="explain",
+            language=language,
+            prompt=prompt,
+            code=code,
+            session_id=sess_id
+        )
 
         record_id = str(uuid.uuid4())
         response_payload = {
@@ -324,17 +307,11 @@ def create_app() -> Flask:
             "mode": "explain",
             "language": language,
             "prompt": prompt,
-            "generated_code": code,
-            "explanation": (
-                "### Code Structure Overview\n"
-                f"Analyzing submitted {language} snippet.\n\n"
-                "In Phase 3, the AI agent will deconstruct execution flow, key functions, time complexity, and limitations."
-            ),
-            "diagnostics": [],
-            "suggestions": [
-                "Examine algorithm design for potential recursion limits or unbound loops."
-            ],
-            "model_name": Config.OLLAMA_MODEL
+            "generated_code": ai_result["generated_code"],
+            "explanation": ai_result["explanation"],
+            "diagnostics": ai_result.get("diagnostics", []),
+            "suggestions": ai_result.get("suggestions", []),
+            "model_name": ai_result.get("model_name", Config.OLLAMA_MODEL)
         }
 
         app.history_store[record_id] = {
@@ -345,9 +322,9 @@ def create_app() -> Flask:
             "user_prompt": prompt,
             "original_code": code,
             "error_message": "",
-            "generated_code": code,
+            "generated_code": response_payload["generated_code"],
             "explanation": response_payload["explanation"],
-            "model_name": Config.OLLAMA_MODEL,
+            "model_name": response_payload["model_name"],
             "created_at": "Just now"
         }
 
@@ -355,7 +332,7 @@ def create_app() -> Flask:
 
     @app.route("/chat", methods=["POST"])
     def chat_followup():
-        """Feature E: Conversational follow-up endpoint."""
+        """Feature E: Conversational follow-up endpoint preserving session context."""
         data = request.get_json(silent=True) or {}
         message = data.get("message", "").strip()
         if not message:
@@ -363,13 +340,18 @@ def create_app() -> Flask:
 
         current_code = data.get("current_code", "")
         language = data.get("language", "python")
+        history = data.get("history", [])
+        sess_id = data.get("session_id", get_or_create_session_id())
 
-        return jsonify({
-            "success": True,
-            "reply": f"Received follow-up: '{message}'. The conversation history pipeline is active.",
-            "generated_code": current_code,
-            "language": language
-        })
+        result = agent_service.process_followup(
+            message=message,
+            current_code=current_code,
+            language=language,
+            history=history,
+            session_id=sess_id
+        )
+
+        return jsonify(result)
 
     # =========================================================================
     # History Routes (Feature F)
