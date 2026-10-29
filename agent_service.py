@@ -39,8 +39,8 @@ except ImportError:
     fake_xxhash.xxh3_128 = lambda data=b"": _PurePythonXXH3(data)  # type: ignore
     sys.modules["xxhash"] = fake_xxhash
 
-from langchain_ollama import ChatOllama
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_ollama import ChatOllama  # pyrefly: ignore[missing-import] # type: ignore
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage  # pyrefly: ignore[missing-import] # type: ignore
 
 
 # ==============================================================================
@@ -49,23 +49,24 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 def get_chat_model(temperature: float = 0.2) -> ChatOllama:
     """
     Instantiate and return the configured LangChain ChatOllama instance.
-    Uses configurable host, model name, and timeout from Config.
-    Caps num_predict to 500 tokens for fast CPU inference.
+    Optimized for high-speed CPU inference matching physical Performance-cores
+    (6 threads, 1024 context, 300 max predict tokens).
     """
     return ChatOllama(
         base_url=Config.OLLAMA_BASE_URL,
         model=Config.OLLAMA_MODEL,
         temperature=temperature,
         timeout=Config.OLLAMA_TIMEOUT,
-        num_predict=500,
-        num_ctx=2048
+        num_predict=300,
+        num_ctx=1024,
+        num_thread=6
     )
 
 
 def check_ollama_status() -> Tuple[bool, str, List[str]]:
     """
     Check if the local Ollama daemon is active and whether the configured
-    model (default: qwen2.5-coder:3b) has been downloaded.
+    model (Config.OLLAMA_MODEL) has been downloaded.
     Returns: (is_available, message, available_models_list)
     """
     try:

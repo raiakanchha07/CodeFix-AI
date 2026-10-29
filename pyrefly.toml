@@ -1,0 +1,9 @@
+# Pyrefly Static Type Checker Configuration
+python-version = "3.13"
+python-platform = "win32"
+python-interpreter = ["C:\\Users\\raiak\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"]
+site-package-path = [
+    "C:\\Users\\raiak\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages",
+    "c:\\Users\\raiak\\venv\\Lib\\site-packages"
+]
+search-path = ["."]

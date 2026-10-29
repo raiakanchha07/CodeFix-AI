@@ -13,7 +13,7 @@ from config import Config
 logger = logging.getLogger("CodeFixAI.Database")
 
 try:
-    import ibm_db
+    import ibm_db  # type: ignore
     IBM_DB_AVAILABLE = True
 except ImportError:
     IBM_DB_AVAILABLE = False
@@ -22,9 +22,9 @@ except ImportError:
 
 def _close_conn(conn):
     """Safely close an IBM Db2 connection handle without bubbling exceptions."""
-    if conn:
+    if conn and IBM_DB_AVAILABLE:
         try:
-            _close_conn(conn)
+            ibm_db.close(conn)
         except Exception:
             pass
 

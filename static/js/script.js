@@ -358,7 +358,7 @@ async function handleFormSubmit(event) {
         showToast(errMsg, 'error');
         renderErrorInOutput(errMsg, [
             'Check that Ollama is running (`ollama serve`).',
-            'Ensure model is downloaded (`ollama pull qwen2.5-coder:3b`).',
+            'Ensure model is downloaded (`ollama pull qwen2.5-coder:1.5b`).',
             'Check terminal for any backend exceptions.'
         ]);
     }
@@ -492,7 +492,7 @@ function renderResult(data) {
     // Badges
     document.getElementById('res-mode-badge').textContent = (data.mode || state.currentMode).toUpperCase();
     document.getElementById('res-lang-badge').textContent = data.language || state.selectedLanguage;
-    document.getElementById('res-model-badge').textContent = data.model_name || 'qwen2.5-coder:3b';
+    document.getElementById('res-model-badge').textContent = data.model_name || 'qwen2.5-coder:1.5b';
 
     // Diagnostics Panel
     const diagPanel = document.getElementById('diagnostics-panel');

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # pyrefly: ignore[missing-import] # type: ignore
 
 # Load environment variables from .env file
 BASE_DIR = Path(__file__).resolve().parent
@@ -18,7 +18,7 @@ class Config:
 
     # Ollama Local AI Runtime Configuration
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:1.5b")
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", 120))
 
     # IBM Db2 Database Configuration

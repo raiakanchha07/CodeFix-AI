@@ -3,7 +3,7 @@ import uuid
 import logging
 from typing import Dict, Any, Tuple
 import requests
-from flask import Flask, render_template, request, jsonify, session, abort
+from flask import Flask, render_template, request, jsonify, session, abort  # pyrefly: ignore[missing-import] # type: ignore
 
 from config import Config
 import analyzer
@@ -461,4 +461,9 @@ if __name__ == "__main__":
     port = Config.PORT
     debug = Config.DEBUG
     logger.info(f"Starting CodeFix AI on port {port} (Debug: {debug})...")
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(
+    host="0.0.0.0",
+    port=port,
+    debug=debug,
+    use_reloader=False
+)
