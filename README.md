@@ -1,6 +1,15 @@
 # CodeFix AI — Intelligent AI Coding Agent
 
-> A full-stack, local-first AI coding assistant tailored for developers and hackathons. Built with **Python**, **Flask**, **LangChain**, **Ollama (`qwen2.5-coder:3b`)**, and **IBM Db2**.
+> A full-stack, local-first AI coding assistant tailored for developers and hackathons. Built with **Python**, **Flask**, **LangChain**, **Ollama (`qwen2.5-coder:1.5b`)**, and **IBM Db2**.
+
+---
+
+## 📹 Demo Video & Quick Links
+
+- 🎥 **Demo Video:** [Watch the Full Walkthrough on YouTube / Loom](https://youtu.be/YOUR_DEMO_VIDEO_ID) <!-- Replace with your actual recorded video URL -->
+- 💻 **Live Application Workspace:** [http://localhost:5000](http://localhost:5000)
+- 🧪 **Automated Test Suite:** `python -m pytest tests/` (36 passing tests)
+- 🔍 **System Diagnostic Check:** `python demo_check.py`
 
 ---
 
